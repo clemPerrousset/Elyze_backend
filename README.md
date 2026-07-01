@@ -1,111 +1,127 @@
 # Elyze Vote Backend
 
-Ultra-lightweight voting backend built in Rust. Designed to handle tens of thousands of requests per minute on minimal hardware.
+Backend de vote ultra-léger écrit en Rust. Conçu pour absorber des dizaines de milliers de requêtes par minute sur du matériel minimal.
 
-**Architecture**: votes are persisted to SQLite (WAL mode), candidate vote counts are cached in RAM and served without any DB hit on reads.
+**Architecture** : les votes sont persistés en SQLite (mode WAL), les compteurs par candidat sont mis en cache en RAM et servis sans aucun accès disque en lecture.
 
 ---
 
-## API Reference
+## Référence API
 
-### POST `/vote` — Cast, change, or retract a vote
+### POST `/vote` — Voter, changer ou annuler un vote
 
-The endpoint handles all three cases automatically:
-- **New vote** → `"voted"`
-- **Same candidate again** → `"unvoted"` (toggle off)
-- **Different candidate** → `"changed"`
+L'endpoint gère automatiquement les trois cas :
+- **Nouveau vote** → `"voted"`
+- **Même candidat à nouveau** → `"unvoted"` (toggle)
+- **Candidat différent** → `"changed"`
 
 ```bash
-curl -X POST http://YOUR_SERVER:3000/vote \
+curl -X POST http://VOTRE_SERVEUR:3000/vote \
   -H "Content-Type: application/json" \
   -d '{
     "phone_id": "device_abc123",
-    "candidate_id": "candidate_42",
-    "token": "YOUR_HMAC_TOKEN"
+    "candidate_id": "candidat_42",
+    "token": "VOTRE_TOKEN_HMAC"
   }'
 ```
 
-**Response `200 OK`:**
+**Réponse `200 OK` :**
 ```json
 { "status": "voted" }
 { "status": "unvoted" }
 { "status": "changed" }
 ```
 
-**Error responses:**
+**Réponses d'erreur :**
 ```json
-{ "error": "invalid token" }        // 401 — bad or expired HMAC
-{ "error": "unknown candidate" }    // 404 — candidate not registered
-{ "error": "missing fields" }       // 400
+{ "error": "invalid token" }        // 401 — HMAC invalide ou expiré
+{ "error": "unknown candidate" }    // 404 — candidat non enregistré
+{ "error": "missing fields" }       // 400 — champs manquants
 ```
 
 ---
 
-### GET `/votes` — Get all vote counts
+### GET `/votes` — Récupérer tous les compteurs de votes
 
-Served entirely from RAM. Zero DB hit.
+Servi entièrement depuis la RAM. Zéro accès à la base de données.
 
 ```bash
-curl http://YOUR_SERVER:3000/votes
+curl http://VOTRE_SERVEUR:3000/votes
 ```
 
-**Response `200 OK`:**
+**Réponse `200 OK` :**
 ```json
 {
   "candidates": [
-    { "id": "candidate_42", "count": 1234 },
-    { "id": "candidate_07", "count": 987 }
+    { "id": "candidat_42", "count": 1234 },
+    { "id": "candidat_07", "count": 987 }
   ]
 }
 ```
 
 ---
 
-### POST `/candidates` — Register a candidate *(admin)*
+### GET `/votes/:phone_id` — Récupérer le vote d'un téléphone
+
+Retourne le candidat pour lequel ce téléphone a voté, ou `null` si aucun vote.
 
 ```bash
-curl -X POST http://YOUR_SERVER:3000/candidates \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Token: YOUR_ADMIN_TOKEN" \
-  -d '{ "id": "candidate_42" }'
+curl http://VOTRE_SERVEUR:3000/votes/device_abc123
 ```
 
-**Response `201 Created`:**
+**Réponse `200 OK` :**
+```json
+{ "candidate_id": "candidat_42" }
+{ "candidate_id": null }
+```
+
+---
+
+### POST `/candidates` — Ajouter un candidat *(admin)*
+
+```bash
+curl -X POST http://VOTRE_SERVEUR:3000/candidates \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Token: VOTRE_ADMIN_TOKEN" \
+  -d '{ "id": "candidat_42" }'
+```
+
+**Réponse `201 Created` :**
 ```json
 { "status": "created" }
 ```
 
-Returns `200 { "status": "already_exists" }` if the ID already exists.
+Retourne `200 { "status": "already_exists" }` si l'ID existe déjà.
 
 ---
 
-### DELETE `/candidates/:id` — Remove a candidate *(admin)*
+### DELETE `/candidates/:id` — Supprimer un candidat *(admin)*
 
-Deletes the candidate and all associated votes (cascade).
+Supprime le candidat et tous ses votes associés (cascade).
 
 ```bash
-curl -X DELETE http://YOUR_SERVER:3000/candidates/candidate_42 \
-  -H "X-Admin-Token: YOUR_ADMIN_TOKEN"
+curl -X DELETE http://VOTRE_SERVEUR:3000/candidates/candidat_42 \
+  -H "X-Admin-Token: VOTRE_ADMIN_TOKEN"
 ```
 
-**Response `200 OK`:**
+**Réponse `200 OK` :**
 ```json
 { "status": "deleted" }
 ```
 
 ---
 
-## Token Generation (HMAC)
+## Génération du token (HMAC)
 
-The mobile app sends a token proving the request comes from a legitimate app install.
+L'app mobile envoie un token prouvant que la requête provient d'un build légitime.
 
-**Formula:** `HMAC-SHA256(phone_id + ":" + YYYYMMDD, VOTE_HMAC_SECRET)`
+**Formule :** `HMAC-SHA256(phone_id + ":" + AAAAMMJJ, VOTE_HMAC_SECRET)`
 
-Tokens are valid for today and yesterday (timezone tolerance).
+Les tokens sont valides pour aujourd'hui et hier (tolérance de fuseau horaire).
 
-**Generate a token for testing (bash):**
+**Générer un token pour tester (bash) :**
 ```bash
-SECRET="your_vote_hmac_secret"
+SECRET="votre_vote_hmac_secret"
 PHONE_ID="device_abc123"
 DATE=$(date +%Y%m%d)
 
@@ -116,78 +132,78 @@ TOKEN=$(printf '%s:%s' "$PHONE_ID" "$DATE" \
 echo "$TOKEN"
 ```
 
-**Full test vote with generated token:**
+**Vote de test complet avec token généré :**
 ```bash
-SECRET="your_vote_hmac_secret"
+SECRET="votre_vote_hmac_secret"
 PHONE_ID="device_abc123"
 DATE=$(date +%Y%m%d)
 TOKEN=$(printf '%s:%s' "$PHONE_ID" "$DATE" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')
 
-curl -X POST http://YOUR_SERVER:3000/vote \
+curl -X POST http://VOTRE_SERVEUR:3000/vote \
   -H "Content-Type: application/json" \
-  -d "{\"phone_id\":\"$PHONE_ID\",\"candidate_id\":\"candidate_42\",\"token\":\"$TOKEN\"}"
+  -d "{\"phone_id\":\"$PHONE_ID\",\"candidate_id\":\"candidat_42\",\"token\":\"$TOKEN\"}"
 ```
 
-**Mobile app (pseudocode):**
+**App mobile (pseudocode) :**
 ```
-secret = BuildConfig.HMAC_SECRET   // from gitignored local.properties
-date   = today().format("YYYYMMDD")
+secret = BuildConfig.HMAC_SECRET   // depuis local.properties (gitignorée)
+date   = aujourdhui().format("AAAAMMJJ")
 token  = HMAC_SHA256(phone_id + ":" + date, secret)
 ```
 
-> During local development, set `VOTE_HMAC_SECRET=DISABLED` to skip validation entirely.
+> En développement local, mettre `VOTE_HMAC_SECRET=DISABLED` pour désactiver la validation.
 
 ---
 
-## Deploy to OVH
+## Déploiement sur OVH
 
-### 1. Prerequisites on your local machine
+### 1. Prérequis sur votre machine locale
 
 ```bash
-# Install Rust
+# Installer Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Add the Linux musl target for a fully static binary
+# Ajouter la cible musl Linux pour un binaire statique
 rustup target add x86_64-unknown-linux-musl
 
-# macOS only: install the musl cross-linker
+# macOS uniquement : installer le cross-compilateur musl
 brew install FiloSottile/musl-cross/musl-cross
 ```
 
-### 2. Build a static binary
+### 2. Compiler un binaire statique
 
 ```bash
 CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=x86_64-linux-musl-gcc \
   cargo build --release --target x86_64-unknown-linux-musl
 
-# Binary: target/x86_64-unknown-linux-musl/release/elyze-vote
+# Binaire : target/x86_64-unknown-linux-musl/release/elyze-vote
 ```
 
-> **Alternative — compile directly on the server** (simpler, no cross-compilation needed):
+> **Alternative — compiler directement sur le serveur** (plus simple, pas de cross-compilation) :
 > ```bash
-> # On the OVH server
+> # Sur le serveur OVH
 > curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 > source "$HOME/.cargo/env"
-> git clone https://github.com/YOUR_ORG/elyze-backend.git
+> git clone https://github.com/VOTRE_ORG/elyze-backend.git
 > cd elyze-backend
 > cargo build --release
-> # Binary: target/release/elyze-vote
+> # Binaire : target/release/elyze-vote
 > ```
 
-### 3. Copy files to the server
+### 3. Copier les fichiers sur le serveur
 
 ```bash
-ssh user@YOUR_SERVER "sudo mkdir -p /opt/elyze && sudo chown user:user /opt/elyze"
+ssh user@VOTRE_SERVEUR "sudo mkdir -p /opt/elyze && sudo chown user:user /opt/elyze"
 
-scp target/x86_64-unknown-linux-musl/release/elyze-vote user@YOUR_SERVER:/opt/elyze/
+scp target/x86_64-unknown-linux-musl/release/elyze-vote user@VOTRE_SERVEUR:/opt/elyze/
 
-ssh user@YOUR_SERVER "chmod +x /opt/elyze/elyze-vote"
+ssh user@VOTRE_SERVEUR "chmod +x /opt/elyze/elyze-vote"
 ```
 
-### 4. Create the `.env` on the server
+### 4. Créer le fichier `.env` sur le serveur
 
 ```bash
-ssh user@YOUR_SERVER
+ssh user@VOTRE_SERVEUR
 cd /opt/elyze
 
 HMAC_SECRET=$(openssl rand -hex 32)
@@ -203,14 +219,14 @@ EOF
 
 chmod 600 .env
 
-echo "=== SAVE THESE ==="
+echo "=== SAUVEGARDER CES VALEURS ==="
 echo "HMAC_SECRET: $HMAC_SECRET"
 echo "ADMIN_TOKEN: $ADMIN_TOKEN"
 ```
 
-**Save the printed secrets somewhere safe — you won't see them again.**
+**Notez les secrets affichés — vous ne les reverrez plus.**
 
-### 5. systemd service
+### 5. Service systemd
 
 ```bash
 sudo tee /etc/systemd/system/elyze-vote.service > /dev/null << 'EOF'
@@ -244,18 +260,18 @@ sudo systemctl start elyze-vote
 sudo systemctl status elyze-vote
 ```
 
-### 6. View logs
+### 6. Consulter les logs
 
 ```bash
 journalctl -u elyze-vote -f
 ```
 
-### 7. (Optional) Nginx reverse proxy
+### 7. (Optionnel) Reverse proxy Nginx
 
 ```nginx
 server {
     listen 80;
-    server_name yourdomain.com;
+    server_name votredomaine.com;
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -265,60 +281,60 @@ server {
 }
 ```
 
-### 8. Update the binary
+### 8. Mettre à jour le binaire
 
 ```bash
-# Build locally, copy, restart
-scp target/x86_64-unknown-linux-musl/release/elyze-vote user@YOUR_SERVER:/opt/elyze/elyze-vote
-ssh user@YOUR_SERVER "sudo systemctl restart elyze-vote"
+git pull
+cargo build --release
+sudo systemctl restart elyze-vote
 ```
 
 ---
 
-## Local Development
+## Développement local
 
 ```bash
-git clone https://github.com/YOUR_ORG/elyze-backend.git
+git clone https://github.com/VOTRE_ORG/elyze-backend.git
 cd elyze-backend
 
 cp .env.example .env
-# In .env, set:
-#   VOTE_HMAC_SECRET=DISABLED   ← skips token validation
+# Dans .env, configurer :
+#   VOTE_HMAC_SECRET=DISABLED   ← désactive la validation du token
 #   ADMIN_TOKEN=dev_token
 
 cargo run
 ```
 
-Run tests:
+Lancer les tests :
 ```bash
 cargo test
 ```
 
 ---
 
-## Performance
+## Performances
 
-| Operation | Latency | Notes |
+| Opération | Latence | Notes |
 |---|---|---|
-| `GET /votes` | ~1 µs | Pure RAM, no DB |
-| `POST /vote` | < 1 ms | One SQLite WAL write |
+| `GET /votes` | ~1 µs | Pure RAM, zéro DB |
+| `POST /vote` | < 1 ms | Un write SQLite WAL |
 
-- SQLite WAL: ~50k writes/sec on a basic SSD
-- Binary size: ~5 MB stripped
-- Idle RAM: < 10 MB
-- Counts survive restarts — reloaded from DB on boot
-
----
-
-## Security
-
-- **HMAC token**: every vote must include a token proving it originates from a signed app build. The secret is never in source — injected at runtime via env var.
-- **Admin token**: candidate management requires `X-Admin-Token` header.
-- **No secrets in source**: `.env` is gitignored. Contributors generate their own keys from `.env.example`.
-- **SQL injection**: all queries use parameterized bindings (`sqlx`).
+- SQLite WAL : ~50k écritures/sec sur un SSD basique
+- Taille du binaire : ~5 Mo strippé
+- RAM au repos : < 10 Mo
+- Les compteurs survivent aux redémarrages — rechargés depuis la DB au boot
 
 ---
 
-## License
+## Sécurité
 
-Open source. See LICENSE.
+- **Token HMAC** : chaque vote doit inclure un token prouvant qu'il provient d'un build signé. Le secret n'est jamais dans le code source — injecté à l'exécution via variable d'environnement.
+- **Token admin** : la gestion des candidats nécessite le header `X-Admin-Token`.
+- **Aucun secret dans le code** : `.env` est gitignorée. Les contributeurs génèrent leurs propres clés depuis `.env.example`.
+- **Injection SQL** : toutes les requêtes utilisent des bindings paramétrés (`sqlx`).
+
+---
+
+## Licence
+
+Open source. Voir LICENSE.
