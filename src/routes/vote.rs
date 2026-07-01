@@ -47,12 +47,13 @@ pub async fn post_vote(
             .into_response();
     }
 
+    // Auto-enregistre le candidat s'il n'existe pas encore
     if !state.counts.contains_key(&req.candidate_id) {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({"error": "unknown candidate"})),
-        )
-            .into_response();
+        let _ = sqlx::query("INSERT OR IGNORE INTO candidates (id) VALUES (?)")
+            .bind(&req.candidate_id)
+            .execute(&state.db)
+            .await;
+        state.counts.entry(req.candidate_id.clone()).or_insert(0);
     }
 
     let existing: Option<(String,)> =
