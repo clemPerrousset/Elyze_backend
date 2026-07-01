@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Json, State},
+    extract::{Json, Path, State},
     http::StatusCode,
     response::IntoResponse,
 };
@@ -139,6 +139,24 @@ pub async fn post_vote(
             )
                 .into_response()
         }
+    }
+}
+
+/// Returns the candidate the given phone has voted for, or null if no vote.
+pub async fn get_my_vote(
+    State(state): State<Arc<AppState>>,
+    Path(phone_id): Path<String>,
+) -> impl IntoResponse {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT candidate_id FROM votes WHERE phone_id = ?")
+            .bind(&phone_id)
+            .fetch_optional(&state.db)
+            .await
+            .unwrap_or(None);
+
+    match row {
+        Some((candidate_id,)) => Json(serde_json::json!({ "candidate_id": candidate_id })).into_response(),
+        None => Json(serde_json::json!({ "candidate_id": null })).into_response(),
     }
 }
 

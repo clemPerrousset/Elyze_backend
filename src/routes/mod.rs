@@ -14,6 +14,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
         .route("/vote", post(vote::post_vote))
         .route("/votes", get(vote::get_votes))
+        .route("/votes/:phone_id", get(vote::get_my_vote))
         .route("/candidates", post(candidates::add_candidate))
         .route("/candidates/:id", delete(candidates::delete_candidate))
         .with_state(state)
