@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Json, Path, State},
+    extract::{Json, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
 };
@@ -101,5 +101,62 @@ pub async fn get_my_vote(
             Json(serde_json::json!({ "candidate_id": candidate_id.clone() })).into_response()
         }
         None => Json(serde_json::json!({ "candidate_id": null })).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct HistoryQuery {
+    /// Liste d'ids de candidats séparés par des virgules, ex: "melenchon_jeanluc,lepen_marine".
+    /// Si absent/vide, l'historique de tous les candidats est renvoyé.
+    candidate_ids: Option<String>,
+}
+
+#[derive(Serialize)]
+struct HistoryPoint {
+    date: i64,
+    candidate_id: String,
+    votes: i64,
+}
+
+#[derive(Serialize)]
+struct HistoryResponse {
+    history: Vec<HistoryPoint>,
+}
+
+/// Historique des voix dans le temps, pour les candidats dont les ids sont envoyés par le front.
+pub async fn get_history(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<HistoryQuery>,
+) -> impl IntoResponse {
+    let ids: Vec<String> = params
+        .candidate_ids
+        .map(|raw| {
+            raw.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    match crate::db::get_history(&state.db, &ids).await {
+        Ok(rows) => {
+            let history = rows
+                .into_iter()
+                .map(|(candidate_id, votes, date)| HistoryPoint {
+                    date,
+                    candidate_id,
+                    votes,
+                })
+                .collect();
+            (StatusCode::OK, Json(HistoryResponse { history })).into_response()
+        }
+        Err(e) => {
+            tracing::error!("history query error: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "internal error"})),
+            )
+                .into_response()
+        }
     }
 }

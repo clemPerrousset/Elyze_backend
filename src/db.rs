@@ -45,6 +45,23 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS vote_snapshots (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            candidate_id TEXT NOT NULL,
+            vote_count   INTEGER NOT NULL,
+            captured_at  INTEGER NOT NULL DEFAULT (unixepoch())
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_snapshots_candidate_date ON vote_snapshots(candidate_id, captured_at)",
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 
@@ -122,4 +139,56 @@ pub async fn flush(pool: &SqlitePool, ops: Vec<PendingOp>) -> Result<(), sqlx::E
 
     tx.commit().await?;
     Ok(())
+}
+
+/// Enregistre un instantané des compteurs actuels (un point par candidat, même timestamp).
+pub async fn insert_snapshot(
+    pool: &SqlitePool,
+    counts: &DashMap<String, i64>,
+) -> Result<(), sqlx::Error> {
+    if counts.is_empty() {
+        return Ok(());
+    }
+
+    let captured_at = chrono::Utc::now().timestamp();
+    let mut tx = pool.begin().await?;
+
+    for entry in counts.iter() {
+        sqlx::query(
+            "INSERT INTO vote_snapshots (candidate_id, vote_count, captured_at) VALUES (?, ?, ?)",
+        )
+        .bind(entry.key())
+        .bind(*entry.value())
+        .bind(captured_at)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Historique des voix dans le temps pour les candidats demandés (tous si `candidate_ids` est vide).
+pub async fn get_history(
+    pool: &SqlitePool,
+    candidate_ids: &[String],
+) -> Result<Vec<(String, i64, i64)>, sqlx::Error> {
+    if candidate_ids.is_empty() {
+        sqlx::query_as(
+            "SELECT candidate_id, vote_count, captured_at FROM vote_snapshots ORDER BY captured_at ASC",
+        )
+        .fetch_all(pool)
+        .await
+    } else {
+        let placeholders = candidate_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT candidate_id, vote_count, captured_at FROM vote_snapshots WHERE candidate_id IN ({}) ORDER BY captured_at ASC",
+            placeholders
+        );
+        let mut query = sqlx::query_as(&sql);
+        for id in candidate_ids {
+            query = query.bind(id);
+        }
+        query.fetch_all(pool).await
+    }
 }

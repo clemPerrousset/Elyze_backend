@@ -77,6 +77,32 @@ async fn main() {
         }
     });
 
+    // Tâche background : instantané périodique des compteurs pour le graphique de progression
+    let snapshot_state = state.clone();
+    let snapshot_interval_secs: u64 = std::env::var("SNAPSHOT_INTERVAL_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(900);
+    tokio::spawn(async move {
+        if let Err(e) = db::insert_snapshot(&snapshot_state.db, &snapshot_state.counts).await {
+            tracing::error!("Initial snapshot error: {}", e);
+        }
+        let mut interval =
+            tokio::time::interval(tokio::time::Duration::from_secs(snapshot_interval_secs));
+        interval.tick().await; // le premier tick est immédiat, on l'ignore (snapshot déjà pris ci-dessus)
+        loop {
+            interval.tick().await;
+            if let Err(e) = db::insert_snapshot(&snapshot_state.db, &snapshot_state.counts).await {
+                tracing::error!("Snapshot error: {}", e);
+            } else {
+                tracing::debug!(
+                    "Vote snapshot recorded ({} candidates)",
+                    snapshot_state.counts.len()
+                );
+            }
+        }
+    });
+
     let app = routes::create_router(state);
 
     let addr = std::env::var("LISTEN_ADDR")
