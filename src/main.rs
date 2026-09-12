@@ -82,7 +82,7 @@ async fn main() {
     let snapshot_interval_secs: u64 = std::env::var("SNAPSHOT_INTERVAL_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(900);
+        .unwrap_or(8 * 3600); // 3 instantanés / jour par défaut
     tokio::spawn(async move {
         if let Err(e) = db::insert_snapshot(&snapshot_state.db, &snapshot_state.counts).await {
             tracing::error!("Initial snapshot error: {}", e);

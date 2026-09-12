@@ -79,7 +79,7 @@ curl http://VOTRE_SERVEUR:3000/votes/device_abc123
 
 ### GET `/votes/history` — Historique des voix dans le temps
 
-Renvoie l'évolution des compteurs de voix (un instantané périodique, toutes les `SNAPSHOT_INTERVAL_SECS` secondes — 15 min par défaut). Sert à tracer la progression des candidats. Le front envoie les ids des candidats à afficher via `candidate_ids` (séparés par des virgules) ; si le paramètre est absent ou vide, l'historique de tous les candidats est renvoyé.
+Renvoie l'évolution des compteurs de voix (un instantané périodique, toutes les `SNAPSHOT_INTERVAL_SECS` secondes — 3 fois par jour, soit toutes les 8h, par défaut). Sert à tracer la progression des candidats. Le front envoie les ids des candidats à afficher via `candidate_ids` (séparés par des virgules) ; si le paramètre est absent ou vide, l'historique de tous les candidats est renvoyé.
 
 ```bash
 curl "http://VOTRE_SERVEUR:3000/votes/history?candidate_ids=candidat_42,candidat_07"
@@ -99,7 +99,7 @@ curl "http://VOTRE_SERVEUR:3000/votes/history?candidate_ids=candidat_42,candidat
 
 - `date` : timestamp Unix (secondes) de l'instantané.
 - Les points sont triés par `date` croissant. Le front doit tracer la progression à partir de la première date renvoyée.
-- Configurable via `SNAPSHOT_INTERVAL_SECS` (variable d'env, défaut `900`).
+- Configurable via `SNAPSHOT_INTERVAL_SECS` (variable d'env, défaut `28800` = 8h, soit 3 instantanés/jour).
 
 ---
 
