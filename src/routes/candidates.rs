@@ -18,7 +18,7 @@ fn check_admin(headers: &HeaderMap, admin_token: &str) -> bool {
     headers
         .get("X-Admin-Token")
         .and_then(|v| v.to_str().ok())
-        .map(|v| v == admin_token)
+        .map(|v| crate::auth::constant_time_eq(v.as_bytes(), admin_token.as_bytes()))
         .unwrap_or(false)
 }
 

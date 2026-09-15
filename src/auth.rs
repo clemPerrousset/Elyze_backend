@@ -7,11 +7,21 @@ type HmacSha256 = Hmac<Sha256>;
 /// Token format: HMAC-SHA256(phone_id + ":" + YYYYMMDD, secret)
 /// We accept today and yesterday to handle timezone edge cases.
 ///
-/// If secret is set to "DISABLED", validation is skipped (dev mode only).
+/// If secret is set to "DISABLED", validation is skipped — but only in debug
+/// builds (`cfg!(debug_assertions)`). Un `cargo build --release` (celui du
+/// Cargo.toml de ce projet) ignore toujours "DISABLED", donc une mauvaise
+/// config d'env en prod ne peut plus désactiver l'authentification.
 pub fn verify_phone_token(phone_id: &str, token: &str, secret: &str) -> bool {
-    if secret == "DISABLED" {
+    if secret == "DISABLED" && cfg!(debug_assertions) {
         return true;
     }
+
+    // Comparaison en temps constant via `verify_slice` (fournie par la crate
+    // `hmac`), plutôt que hex::encode(...) == token qui fuite le temps de
+    // calcul octet par octet.
+    let Ok(token_bytes) = hex::decode(token) else {
+        return false;
+    };
 
     let now = Utc::now();
     let dates = [
@@ -25,14 +35,22 @@ pub fn verify_phone_token(phone_id: &str, token: &str, secret: &str) -> bool {
         let message = format!("{}:{}", phone_id, date);
         if let Ok(mut mac) = HmacSha256::new_from_slice(secret.as_bytes()) {
             mac.update(message.as_bytes());
-            let result = hex::encode(mac.finalize().into_bytes());
-            if result == token {
+            if mac.verify_slice(&token_bytes).is_ok() {
                 return true;
             }
         }
     }
 
     false
+}
+
+/// Comparaison en temps constant pour les secrets comparés hors HMAC
+/// (ex: token admin), afin d'éviter les timing attacks.
+pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 #[cfg(test)]

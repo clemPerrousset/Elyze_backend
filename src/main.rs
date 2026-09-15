@@ -1,9 +1,11 @@
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
 mod auth;
 mod db;
+mod rate_limit;
 mod routes;
 mod state;
 
@@ -53,6 +55,8 @@ async fn main() {
             .expect("VOTE_HMAC_SECRET must be set"),
         admin_token: std::env::var("ADMIN_TOKEN")
             .expect("ADMIN_TOKEN must be set"),
+        rate_limits: Arc::new(dashmap::DashMap::new()),
+        bans: Arc::new(dashmap::DashMap::new()),
     });
 
     // Tâche background : flush toutes les 5 secondes
@@ -113,5 +117,10 @@ async fn main() {
         .expect("Failed to bind");
 
     tracing::info!("Listening on {}", addr);
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .unwrap();
 }

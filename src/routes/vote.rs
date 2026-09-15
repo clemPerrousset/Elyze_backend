@@ -39,10 +39,29 @@ pub async fn post_vote(
             .into_response();
     }
 
+    if req.phone_id.len() > 128 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "phone_id too long"})),
+        )
+            .into_response();
+    }
+
     if !auth::verify_phone_token(&req.phone_id, &req.token, &state.hmac_secret) {
         return (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({"error": "invalid token"})),
+        )
+            .into_response();
+    }
+
+    // Le candidat doit déjà exister (créé via POST /candidates) — sinon un
+    // token valide suffirait à polluer les compteurs publics avec des
+    // candidats fantômes.
+    if !state.counts.contains_key(&req.candidate_id) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "unknown candidate_id"})),
         )
             .into_response();
     }
@@ -91,11 +110,32 @@ pub async fn get_votes(State(state): State<Arc<AppState>>) -> impl IntoResponse 
     Json(VotesResponse { candidates })
 }
 
-/// Retourne le candidat pour lequel ce téléphone a voté, ou null si aucun vote.
+#[derive(Deserialize)]
+pub struct DeviceVoteQuery {
+    /// Même token HMAC que POST /vote — prouve que l'appelant est bien
+    /// le propriétaire de ce phone_id. Optionnel pour une transition en
+    /// douceur : absent/invalide => on répond "pas voté" plutôt qu'une
+    /// erreur, sans jamais révéler le vote réel d'un tiers.
+    token: Option<String>,
+}
+
+/// Retourne le candidat pour lequel ce téléphone a voté, ou null si aucun vote
+/// (ou si le token ne prouve pas la propriété du phone_id).
 pub async fn get_my_vote(
     State(state): State<Arc<AppState>>,
     Path(phone_id): Path<String>,
+    Query(params): Query<DeviceVoteQuery>,
 ) -> impl IntoResponse {
+    let authorized = params
+        .token
+        .as_deref()
+        .map(|token| auth::verify_phone_token(&phone_id, token, &state.hmac_secret))
+        .unwrap_or(false);
+
+    if !authorized {
+        return Json(serde_json::json!({ "candidate_id": null })).into_response();
+    }
+
     match state.votes.get(&phone_id) {
         Some(candidate_id) => {
             Json(serde_json::json!({ "candidate_id": candidate_id.clone() })).into_response()
